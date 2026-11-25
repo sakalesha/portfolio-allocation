@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portfolio Allocator — Two-Round Whole-Share Execution Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <!-- Top Masthead -->
+    <header class="masthead">
+      <div class="masthead-left">
+        <div class="eyebrow">EQUITY EXECUTION DESK · TWO-ROUND WHOLE-SHARE MODEL</div>
+        <h1 class="site-title">Portfolio Allocator</h1>
+        <p class="site-subtitle">
+          Round 1 buys whole shares from each stock’s target slice; Round 2 sweeps leftover cash into extra shares in priority order.
+        </p>
+      </div>
+
+      <div class="masthead-actions" aria-label="Workspace controls">
+        <div class="control-group">
+          <label for="preset-select" class="control-label">Preset</label>
+          <select id="preset-select" class="select-input">
+            <option value="">Load sample…</option>
+            <option value="techCore">Tech Core (4 stocks)</option>
+            <option value="dividendValue">Dividend Value (3 stocks)</option>
+            <option value="priorityTie">Priority Tie Test (4 stocks)</option>
+            <option value="singleStock">Single Stock</option>
+          </select>
+        </div>
+
+        <div class="control-group">
+          <label for="currency-select" class="control-label">Currency</label>
+          <select id="currency-select" class="select-input">
+            <option value="₹" selected>INR (₹)</option>
+            <option value="€">EUR (€)</option>
+            <option value="£">GBP (£)</option>
+            <option value="">None</option>
+          </select>
+        </div>
+
+        <button type="button" id="reset-btn" class="btn btn-ghost" title="Reset to default sample">
+          Reset
+        </button>
+      </div>
+    </header>
+
+    <!-- Live KPI Summary Ribbon -->
+    <section class="kpi-ribbon" aria-label="Portfolio summary metrics" aria-live="polite">
+      <article class="kpi-card">
+        <span class="kpi-label">Total Fund</span>
+        <strong class="kpi-value mono" id="kpi-fund">—</strong>
+        <span class="kpi-meta" id="kpi-stock-count">0 stocks configured</span>
+      </article>
+
+      <article class="kpi-card kpi-card--invested">
+        <span class="kpi-label">Invested in Shares</span>
+        <strong class="kpi-value mono" id="kpi-invested">—</strong>
+        <span class="kpi-meta" id="kpi-invested-pct">0.00% deployed</span>
+      </article>
+
+      <article class="kpi-card kpi-card--amber">
+        <span class="kpi-label">Leftover After Round 1</span>
+        <strong class="kpi-value mono" id="kpi-leftover-r1">—</strong>
+        <span class="kpi-meta" id="kpi-extra-shares">0 extra shares bought</span>
+      </article>
+
+      <article class="kpi-card">
+        <span class="kpi-label">Total Brokerage</span>
+        <strong class="kpi-value mono" id="kpi-brokerage">—</strong>
+        <span class="kpi-meta" id="kpi-brokerage-pct">0.00% of fund</span>
+      </article>
+
+      <article class="kpi-card">
+        <span class="kpi-label">Unused (Left in Cash)</span>
+        <strong class="kpi-value mono" id="kpi-unused">—</strong>
+        <span class="kpi-meta" id="kpi-total-shares">0 total whole shares</span>
+      </article>
+    </section>
+
+    <!-- Main Split Workspace -->
+    <main class="workspace-grid">
+      <!-- Left Panel: Fund & Stock Parameters -->
+      <section class="panel panel-inputs" aria-labelledby="inputs-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="inputs-heading" class="panel-title">1. Fund &amp; Stock Parameters</h2>
+            <p class="panel-desc">Enter capital, target weights (must total 100%), Round 2 priority, share price, and per-share brokerage.</p>
+          </div>
+        </div>
+
+        <!-- Fund Input + Allocation Meter -->
+        <div class="fund-bar">
+          <div class="fund-field">
+            <label for="fund-input" class="field-label">Total Fund Amount</label>
+            <div class="input-with-prefix">
+              <span class="input-prefix" id="fund-currency-prefix">₹</span>
+              <input
+                id="fund-input"
+                type="text"
+                inputmode="decimal"
+                class="text-input mono"
+                placeholder="100,000"
+                autocomplete="off"
+              >
+            </div>
+            <p class="field-error" id="fund-error" role="alert"></p>
+          </div>
+
+          <div class="allocation-meter" aria-live="polite">
+            <div class="meter-header">
+              <span class="field-label">Allocation Total</span>
+              <span class="meter-status mono" id="alloc-status-badge">100.00%</span>
+            </div>
+            <div class="meter-track" id="alloc-meter-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">
+              <!-- Segmented bars injected by JS -->
+            </div>
+            <div class="meter-actions">
+              <button type="button" id="equalize-btn" class="btn btn-xs">Distribute Equally</button>
+              <button type="button" id="fill-remaining-btn" class="btn btn-xs">Fill Remaining to Last</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Validation Banner -->
+        <div id="validation-banner" class="alert-banner" role="alert" hidden></div>
+
+        <!-- Stock Rows Ledger -->
+        <div class="stocks-header-row" aria-hidden="true">
+          <span>Stock / Symbol</span>
+          <span>Priority</span>
+          <span>Alloc %</span>
+          <span>Share Price</span>
+          <span>Brokerage / sh</span>
+          <span></span>
+        </div>
+
+        <div id="stocks-list" class="stocks-list" role="list">
+          <!-- Rows injected by app.js -->
+        </div>
+
+        <div class="panel-footer-actions">
+          <button type="button" id="add-stock-btn" class="btn btn-primary">
+            <span aria-hidden="true">+</span> Add Stock
+          </button>
+          <span class="rule-hint" id="priority-hint">
+            Priority <code>1</code> = highest. Ties preserve input order.
+          </span>
+        </div>
+      </section>
+
+      <!-- Right Panel: Capital Breakdown & Round 2 Walkthrough -->
+      <section class="panel panel-analysis" aria-labelledby="analysis-heading">
+        <div class="panel-header">
+          <div>
+            <h2 id="analysis-heading" class="panel-title">2. Allocation Mechanics</h2>
+            <p class="panel-desc">How capital splits across Round 1 slices and cascades through Round 2 leftover cash.</p>
+          </div>
+        </div>
+
+        <!-- Capital Deployment Stack -->
+        <div class="subcard">
+          <div class="subcard-header">
+            <h3 class="subcard-title">Capital Deployment</h3>
+            <span class="subcard-note mono" id="deployment-efficiency">—</span>
+          </div>
+          <div class="capital-bar" id="capital-stack-bar" aria-label="Capital breakdown bar"></div>
+          <div class="capital-legend" id="capital-legend">
+            <span class="legend-item"><i class="swatch swatch--base"></i>Round 1 Base <strong class="mono" id="leg-base">—</strong></span>
+            <span class="legend-item"><i class="swatch swatch--extra"></i>Round 2 Extra <strong class="mono" id="leg-extra">—</strong></span>
+            <span class="legend-item"><i class="swatch swatch--fee"></i>Brokerage <strong class="mono" id="leg-fee">—</strong></span>
+            <span class="legend-item"><i class="swatch swatch--cash"></i>Unused Cash <strong class="mono" id="leg-cash">—</strong></span>
+          </div>
+        </div>
+
+        <!-- Target vs Actual Weight Drift -->
+        <div class="subcard">
+          <div class="subcard-header">
+            <h3 class="subcard-title">Target vs. Actual Invested %</h3>
+            <span class="subcard-note">Whole-share rounding &amp; Round 2 impact</span>
+          </div>
+          <div id="weight-comparison-list" class="weight-comparison-list"></div>
+        </div>
+
+        <!-- Round 2 Priority Cascade -->
+        <div class="subcard">
+          <div class="subcard-header">
+            <h3 class="subcard-title">Round 2 Leftover Cascade</h3>
+            <span class="subcard-note mono" id="round2-pool-badge">—</span>
+          </div>
+          <ol id="round2-cascade" class="cascade-list">
+            <!-- Steps injected by JS -->
+          </ol>
+        </div>
+      </section>
+    </main>
+
+    <!-- Full-Width Execution Report Table -->
+    <section class="panel panel-report" aria-labelledby="report-heading">
+      <div class="panel-header report-header">
+        <div>
+          <h2 id="report-heading" class="panel-title">3. Execution Ticket &amp; Share Report</h2>
+          <p class="panel-desc">
+            <strong>Base</strong> = shares bought from the stock’s own allocation ·
+            <strong>Extra</strong> = shares bought from leftover cash, in priority order.
+          </p>
+        </div>
+
+        <div class="report-toolbar">
+          <div class="segmented-control" role="group" aria-label="Sort report order">
+            <button type="button" class="seg-btn is-active" data-sort="input">Input Order</button>
+            <button type="button" class="seg-btn" data-sort="priority">Priority Order</button>
+          </div>
+          <button type="button" id="copy-report-btn" class="btn btn-secondary">Copy Text Report</button>
+          <button type="button" id="export-csv-btn" class="btn btn-secondary">Export CSV</button>
+          <button type="button" id="print-btn" class="btn btn-ghost">Print</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="report-table">
+          <thead>
+            <tr>
+              <th>Stock</th>
+              <th class="num">Pri</th>
+              <th class="num">Alloc %</th>
+              <th class="num">Allocated</th>
+              <th class="num">Price</th>
+              <th class="num">Brok/sh</th>
+              <th class="num">Base</th>
+              <th class="num">Extra</th>
+              <th class="num">Total</th>
+              <th class="num">Invested</th>
+              <th class="num">Brokerage</th>
+              <th class="num">Actual %</th>
+            </tr>
+          </thead>
+          <tbody id="report-tbody">
+            <!-- Rows injected by JS -->
+          </tbody>
+          <tfoot id="report-tfoot">
+            <!-- Totals injected by JS -->
+          </tfoot>
+        </table>
+      </div>
+
+      <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    </section>
+
+    <footer class="site-footer">
+      <span>Exact <code>BigInt</code> decimal arithmetic — parity with Python’s <code>decimal.Decimal</code> in <code>portfolio_allocator.py</code>.</span>
+      <span id="footer-status">Ready</span>
+    </footer>
+  </div>
+
+  <script src="decimal.js" defer></script>
+  <script src="allocator.js" defer></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
